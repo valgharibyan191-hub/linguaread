@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="hy">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LinguaRead — Կարդա անգլերեն, սովորիր հայերենով</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { fontFamily: { serif: ['Georgia', 'Cambria', 'Times New Roman', 'serif'] } } }
+  };
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  .word { cursor: pointer; border-radius: 4px; padding: 0 1px; transition: background-color .15s; }
+  .word:hover { background: rgba(217, 119, 6, .22); }
+  .word.active { background: rgba(217, 119, 6, .38); }
+  .word.saved { border-bottom: 2px dotted #d97706; }
+  #reader p { margin-bottom: 1.1em; text-align: left; hyphens: auto; }
+  .fade-in { animation: fade .15s ease-out; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+
+<body class="bg-amber-50 text-stone-800 dark:bg-slate-900 dark:text-slate-200 min-h-screen transition-colors">
+
+<!-- ================= HEADER ================= -->
+<header class="sticky top-0 z-30 bg-amber-50/90 dark:bg-slate-900/90 backdrop-blur border-b border-amber-200 dark:border-slate-700">
+  <div class="max-w-4xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+    <div class="flex-1 min-w-[200px]">
+      <h1 class="text-xl font-bold tracking-tight">📖 LinguaRead</h1>
+      <p class="text-xs text-stone-600 dark:text-slate-400">Կարդա անգլերեն գրքեր և սովորիր հայերեն թարգմանությամբ</p>
+    </div>
+    <span class="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">
+      🎁 Առաջին PDF-ի ընթերցումը լիովին անվճար է
+    </span>
+    <div class="flex items-center gap-1">
+      <button id="btnSettings" class="px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 dark:hover:bg-slate-800 flex items-center gap-1" title="Կարգավորումներ (Gemini API Key)">⚙️ <span id="keyDot" class="inline-block w-2 h-2 rounded-full bg-red-500"></span></button>
+      <button id="btnVocab" class="px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 dark:hover:bg-slate-800" title="Պահված բառեր">⭐ <span id="vocabCount">0</span></button>
+      <button id="btnSmaller" class="px-2 py-1.5 rounded-lg text-sm hover:bg-amber-100 dark:hover:bg-slate-800" title="Փոքրացնել տառաչափը">A−</button>
+      <button id="btnBigger" class="px-2 py-1.5 rounded-lg text-sm font-bold hover:bg-amber-100 dark:hover:bg-slate-800" title="Մեծացնել տառաչափը">A+</button>
+      <button id="btnTheme" class="px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 dark:hover:bg-slate-800" title="Լույս / Մութ ռեժիմ">🌙</button>
+    </div>
+  </div>
+  <div class="h-1 bg-amber-100 dark:bg-slate-800"><div id="progress" class="h-1 bg-amber-500 w-0 transition-all"></div></div>
+</header>
+
+<main class="max-w-3xl mx-auto px-4 py-8">
+
+  <!-- ================= UPLOAD ================= -->
+  <section id="uploadSection">
+    <label id="dropzone" for="fileInput"
+      class="block cursor-pointer text-center rounded-2xl border-2 border-dashed border-amber-300 dark:border-slate-600 bg-white/60 dark:bg-slate-800/60 p-10 hover:border-amber-500 transition">
+      <div class="text-5xl mb-3">📄</div>
+      <p class="text-lg font-semibold">Քաշիր այստեղ PDF ֆայլը կամ սեղմիր ընտրելու համար</p>
+      <p class="text-sm text-stone-500 dark:text-slate-400 mt-1">Աջակցվում են անգլերեն տեքստային PDF-ներ (ոչ սկանավորված նկարներ)</p>
+      <input id="fileInput" type="file" accept="application/pdf" class="hidden" />
+    </label>
+    <div class="text-center mt-4">
+      <button id="btnDemo" class="text-sm underline text-amber-700 dark:text-amber-400 hover:no-underline">Կամ փորձիր օրինակելի տեքստով</button>
+    </div>
+    <p id="keyHint" class="hidden text-center text-sm mt-4 text-amber-800 dark:text-amber-300">
+      ⚠️ Թարգմանության համար մուտքագրիր Google Gemini API բանալին՝
+      <button id="keyHintBtn" class="underline font-semibold hover:no-underline">⚙️ Կարգավորումներ</button>
+    </p>
+    <div id="status" class="text-center text-sm mt-4 text-stone-600 dark:text-slate-400 hidden"></div>
+  </section>
+
+  <!-- ================= READER ================= -->
+  <section id="readerSection" class="hidden">
+    <div class="flex items-center justify-between mb-4 gap-2">
+      <div class="min-w-0">
+        <h2 id="bookTitle" class="font-semibold truncate"></h2>
+        <p class="text-xs text-stone-500 dark:text-slate-400">Սեղմիր ցանկացած բառի վրա՝ թարգմանությունը տեսնելու համար</p>
+      </div>
+      <button id="btnNewBook" class="text-sm px-3 py-1.5 rounded-lg border border-amber-300 dark:border-slate-600 hover:bg-amber-100 dark:hover:bg-slate-800 shrink-0">Նոր ֆայլ</button>
+    </div>
+
+    <article id="reader"
+      class="font-serif leading-8 rounded-2xl bg-white/70 dark:bg-slate-800/70 shadow-sm border border-amber-100 dark:border-slate-700 p-6 sm:p-10"
+      style="font-size:20px"></article>
+
+    <nav class="flex items-center justify-between mt-6">
+      <button id="btnPrev" class="px-4 py-2 rounded-lg bg-amber-200 hover:bg-amber-300 dark:bg-slate-700 dark:hover:bg-slate-600 disabled:opacity-40">← Նախորդ</button>
+      <div class="text-sm flex items-center gap-2">
+        Էջ
+        <input id="pageInput" type="number" min="1" class="w-16 text-center rounded-md border border-amber-300 dark:border-slate-600 bg-white dark:bg-slate-800 py-1" />
+        / <span id="pageTotal">1</span>
+      </div>
+      <button id="btnNext" class="px-4 py-2 rounded-lg bg-amber-200 hover:bg-amber-300 dark:bg-slate-700 dark:hover:bg-slate-600 disabled:opacity-40">Հաջորդ →</button>
+    </nav>
+  </section>
+</main>
+
+<!-- ================= TOOLTIP ================= -->
+<div id="tooltip" class="hidden fixed z-50 w-80 max-w-[92vw] rounded-xl shadow-xl border border-amber-200 dark:border-slate-600 bg-white dark:bg-slate-800 p-4 fade-in text-base font-sans">
+  <div class="flex items-start justify-between gap-2">
+    <div>
+      <div id="ttWord" class="text-lg font-bold"></div>
+      <div id="ttTranslation" class="text-xl text-amber-700 dark:text-amber-400 font-semibold mt-0.5">…</div>
+      <div id="ttExplain" class="text-sm text-stone-600 dark:text-slate-300 mt-1"></div>
+      <button id="ttKeyBtn" class="hidden mt-2 text-sm px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white">⚙️ Մուտքագրել API բանալին</button>
+    </div>
+    <div class="flex gap-1 shrink-0">
+      <button id="ttSpeak" class="p-1.5 rounded-md hover:bg-amber-100 dark:hover:bg-slate-700" title="Արտասանել">🔊</button>
+      <button id="ttSave" class="p-1.5 rounded-md hover:bg-amber-100 dark:hover:bg-slate-700" title="Պահել բառը">☆</button>
+      <button id="ttClose" class="p-1.5 rounded-md hover:bg-amber-100 dark:hover:bg-slate-700" title="Փակել">✕</button>
+    </div>
+  </div>
+  <div class="mt-3 pt-3 border-t border-amber-100 dark:border-slate-700 text-sm">
+    <div class="text-xs uppercase tracking-wide text-stone-400 dark:text-slate-500 mb-1">Համատեքստ</div>
+    <div id="ttSentence" class="italic text-stone-600 dark:text-slate-300"></div>
+  </div>
+  <div id="ttSource" class="mt-2 text-[10px] text-stone-400 dark:text-slate-500"></div>
+</div>
+
+<!-- ================= VOCAB DRAWER ================= -->
+<aside id="vocabDrawer" class="hidden fixed top-0 right-0 bottom-0 z-40 w-80 max-w-full bg-white dark:bg-slate-800 shadow-2xl border-l border-amber-200 dark:border-slate-700 p-4 overflow-y-auto">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="font-bold">⭐ Պահված բառեր</h3>
+    <button id="vocabClose" class="p-1 rounded hover:bg-amber-100 dark:hover:bg-slate-700">✕</button>
+  </div>
+  <ul id="vocabList" class="space-y-2 text-sm"></ul>
+  <p id="vocabEmpty" class="text-sm text-stone-500 dark:text-slate-400">Դեռ բառեր չկան։ Սեղմիր ☆՝ թարգմանության պատուհանում։</p>
+</aside>
+
+<!-- ================= FREE-TIER MODAL ================= -->
+<div id="limitModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+    <h3 class="text-lg font-bold mb-2">Անվճար ընթերցումն օգտագործվել է</h3>
+    <p class="text-sm text-stone-600 dark:text-slate-300 mb-4">
+      Առաջին PDF-ի ընթերցումն անվճար էր։ Հաջորդ գրքերի համար անհրաժեշտ կլինի բաժանորդագրություն։
+      <span class="block mt-2 text-xs text-stone-500 dark:text-slate-400">(Սա նախատիպ է․ վճարման համակարգը դեռ միացված չէ։)</span>
+    </p>
+    <div class="flex gap-2 justify-end">
+      <button id="limitCancel" class="px-4 py-2 rounded-lg hover:bg-amber-100 dark:hover:bg-slate-700">Չեղարկել</button>
+      <button id="limitContinue" class="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white">Շարունակել (դեմո)</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================= SETTINGS MODAL ================= -->
+<div id="settingsModal" class="hidden fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+  <div class="bg-white dark:bg-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl">
+    <h3 class="text-lg font-bold mb-3">⚙️ Կարգավորումներ</h3>
+    <label for="keyInput" class="block text-sm font-semibold mb-1">Google Gemini API Key</label>
+    <div class="flex gap-2">
+      <input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Տեղադրիր API բանալին (AIza… կամ AQ.…)"
+        class="flex-1 min-w-0 rounded-lg border border-amber-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm" />
+      <button id="keyToggle" class="px-3 rounded-lg border border-amber-300 dark:border-slate-600 hover:bg-amber-100 dark:hover:bg-slate-700" title="Ցույց տալ / թաքցնել">👁</button>
+    </div>
+    <p class="text-xs text-stone-500 dark:text-slate-400 mt-2">
+      Բանալին պահվում է միայն քո բրաուզերի localStorage-ում և ուղարկվում է միայն Google-ին։
+      Անվճար բանալի կարող ես ստանալ
+      <a class="underline text-amber-700 dark:text-amber-400" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio-ում</a>։
+      Եթե մոդելը դատարկ է, փորձվում են <code>gemini-2.0-flash</code> և պահուստային flash մոդելներ՝ <code>v1beta</code> և <code>v1</code> հասցեներով։
+    </p>
+    <label for="modelInput" class="block text-sm font-semibold mt-4 mb-1">Մոդելի անուն <span class="font-normal text-stone-400">(ըստ ցանկության)</span></label>
+    <div class="flex gap-2">
+      <input id="modelInput" type="text" autocomplete="off" spellcheck="false" placeholder="օր.՝ gemini-2.0-flash (դատարկ՝ ավտոմատ)"
+        class="flex-1 min-w-0 rounded-lg border border-amber-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm" />
+      <button id="btnListModels" class="px-3 rounded-lg text-sm border border-amber-300 dark:border-slate-600 hover:bg-amber-100 dark:hover:bg-slate-700" title="Հարցնել Google-ից">Հասանելի մոդելներ</button>
+    </div>
+    <div id="modelList" class="hidden mt-2 max-h-40 overflow-y-auto flex flex-wrap gap-1"></div>
+    <p id="keyModel" class="text-xs text-stone-500 dark:text-slate-400 mt-2"></p>
+    <p id="keyMsg" class="text-sm mt-3 min-h-[1.25rem]"></p>
+    <div class="flex flex-wrap gap-2 justify-end mt-3">
+      <button id="keyRemove" class="px-3 py-2 rounded-lg text-sm text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 mr-auto">Ջնջել բանալին</button>
+      <button id="keyClose" class="px-4 py-2 rounded-lg text-sm hover:bg-amber-100 dark:hover:bg-slate-700">Փակել</button>
+      <button id="keySave" class="px-4 py-2 rounded-lg text-sm bg-amber-500 hover:bg-amber-600 text-white">Պահպանել և ստուգել</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   ԿԱՐԳԱՎՈՐՈՒՄՆԵՐ (CONFIG)
+   ===================================================================== */
+const CONFIG = {
+  modelStorage: 'lr_gemini_model',
+  // Հիմնական մոդելը առաջինն է. 404-ի դեպքում փորձվում են հաջորդները (2.5 և 3.x միտումնավոր չկան)
+  models: ['gemini-2.0-flash', 'gemini-2.0-flash-001', 'gemini-2.0-flash-lite', 'gemini-1.5-flash'],
+  apiHost: 'https://generativelanguage.googleapis.com',
+  apiVersions: ['v1beta', 'v1'],
+  manualStorage: 'lr_gemini_manual',
+  verStorage: 'lr_gemini_ver',
+  keyStorage: 'lr_gemini_key',
+};
+
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+/* =====================================================================
+   ՊԵՏՈՒԹՅՈՒՆ (STATE)
+   ===================================================================== */
+const $ = (id) => document.getElementById(id);
+const state = {
+  pages: [],        // [ [paragraph, paragraph, ...], ... ]
+  current: 0,
+  fontSize: +(localStorage.getItem('lr_font') || 20),
+  vocab: JSON.parse(localStorage.getItem('lr_vocab') || '{}'),
+  activeSpan: null,
+  title: '',
+};
+const cache = new Map();
+
+/* =====================================================================
+   ԹԵՄԱ (Dark / Light)
+   ===================================================================== */
+function applyTheme(dark) {
+  document.documentElement.classList.toggle('dark', dark);
+  $('btnTheme').textContent = dark ? '☀️' : '🌙';
+  localStorage.setItem('lr_theme', dark ? 'dark' : 'light');
+}
+applyTheme(localStorage.getItem('lr_theme') === 'dark');
+$('btnTheme').onclick = () => applyTheme(!document.documentElement.classList.contains('dark'));
+
+function applyFont() {
+  $('reader').style.fontSize = state.fontSize + 'px';
+  localStorage.setItem('lr_font', state.fontSize);
+}
+$('btnBigger').onclick = () => { state.fontSize = Math.min(34, state.fontSize + 2); applyFont(); };
+$('btnSmaller').onclick = () => { state.fontSize = Math.max(14, state.fontSize - 2); applyFont(); };
+applyFont();
+
+/* =====================================================================
+   PDF ՎԵՐԲԵՌՆՈՒՄ ԵՎ ՏԵՔՍՏԻ ԱՐՏԱԴՐՈՒՄ
+   ===================================================================== */
+function setStatus(msg) {
+  const s = $('status');
+  s.textContent = msg;
+  s.classList.toggle('hidden', !msg);
+}
+
+$('fileInput').addEventListener('change', (e) => e.target.files[0] && handleFile(e.target.files[0]));
+const dz = $('dropzone');
+['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('border-amber-500'); }));
+['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('border-amber-500'); }));
+dz.addEventListener('drop', (e) => {
+  const f = e.dataTransfer.files[0];
+  if (f && f.type === 'application/pdf') handleFile(f);
+  else setStatus('Խնդրում ենք ընտրել PDF ֆայլ։');
+});
+
+let pendingFile = null;
+async function handleFile(file) {
+  // Անվճար մակարդակ. առաջին գիրքն անվճար է
+  const used = localStorage.getItem('lr_free_used');
+  if (used && used !== file.name && !sessionStorage.getItem('lr_demo_ok')) {
+    pendingFile = file;
+    $('limitModal').classList.remove('hidden');
+    return;
+  }
+  await loadPdf(file);
+}
+$('limitCancel').onclick = () => { $('limitModal').classList.add('hidden'); pendingFile = null; $('fileInput').value = ''; };
+$('limitContinue').onclick = async () => {
+  $('limitModal').classList.add('hidden');
+  sessionStorage.setItem('lr_demo_ok', '1');
+  if (pendingFile) await loadPdf(pendingFile);
+};
+
+async function loadPdf(file) {
+  try {
+    setStatus('Ընթերցում եմ PDF-ը…');
+    const buf = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+    const pages = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      setStatus(`Մշակվում է էջ ${i} / ${pdf.numPages}…`);
+      const page = await pdf.getPage(i);
+      pages.push(await extractParagraphs(page));
+    }
+    if (!pages.some(p => p.length)) {
+      setStatus('Տեքստ չգտնվեց։ Հավանաբար PDF-ը սկանավորված նկար է։');
+      return;
+    }
+    if (!localStorage.getItem('lr_free_used')) localStorage.setItem('lr_free_used', file.name);
+    openBook(file.name.replace(/\.pdf$/i, ''), pages);
+  } catch (err) {
+    console.error(err);
+    setStatus('Սխալ PDF-ը բացելիս՝ ' + err.message);
+  }
+}
+
+/* Էջից հանում է տողերը և խմբավորում պարբերությունների */
+async function extractParagraphs(page) {
+  const content = await page.getTextContent();
+  const lines = [];
+  let last = null;
+  for (const it of content.items) {
+    if (!('str' in it)) continue;
+    const x = it.transform[4], y = it.transform[5];
+    if (!last || Math.abs(y - last.y) > 2.5) {
+      if (it.str.trim() === '' && !last) continue;
+      last = { y, text: it.str, xEnd: x + (it.width || 0) };
+      lines.push(last);
+    } else {
+      const gap = x - last.xEnd;
+      if (gap > 1 && !last.text.endsWith(' ') && !it.str.startsWith(' ')) last.text += ' ';
+      last.text += it.str;
+      last.xEnd = x + (it.width || 0);
+    }
+  }
+  const clean = lines.map(l => ({ y: l.y, text: l.text.replace(/\s+/g, ' ').trim() })).filter(l => l.text);
+  if (!clean.length) return [];
+
+  const gaps = [];
+  for (let i = 1; i < clean.length; i++) {
+    const g = clean[i - 1].y - clean[i].y;
+    if (g > 0) gaps.push(g);
+  }
+  gaps.sort((a, b) => a - b);
+  const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 14;
+
+  const paras = [];
+  let cur = clean[0].text;
+  for (let i = 1; i < clean.length; i++) {
+    const g = clean[i - 1].y - clean[i].y;
+    if (g > median * 1.45) {
+      paras.push(cur);
+      cur = clean[i].text;
+    } else if (/[A-Za-z]-$/.test(cur)) {
+      cur = cur.slice(0, -1) + clean[i].text; // հեռացնում է տողադարձի գծիկը
+    } else {
+      cur += ' ' + clean[i].text;
+    }
+  }
+  paras.push(cur);
+  return paras;
+}
+
+/* =====================================================================
+   ԸՆԹԵՐՑԱՐԱՆ
+   ===================================================================== */
+function openBook(title, pages) {
+  state.title = title;
+  state.pages = pages;
+  state.current = +(localStorage.getItem('lr_pos_' + title) || 0);
+  if (state.current >= pages.length) state.current = 0;
+  $('bookTitle').textContent = title;
+  $('pageTotal').textContent = pages.length;
+  $('pageInput').max = pages.length;
+  $('uploadSection').classList.add('hidden');
+  $('readerSection').classList.remove('hidden');
+  setStatus('');
+  renderPage();
+}
+
+const WORD_RE = /[A-Za-z]+(?:['’][A-Za-z]+)*(?:-[A-Za-z]+)*/g;
+
+function renderPage() {
+  hideTooltip();
+  const reader = $('reader');
+  reader.innerHTML = '';
+  const paras = state.pages[state.current] || [];
+  if (!paras.length) {
+    reader.innerHTML = '<p class="text-stone-400">(Այս էջում տեքստ չկա)</p>';
+  }
+  for (const text of paras) {
+    const p = document.createElement('p');
+    p.dataset.text = text;
+    let idx = 0, m;
+    WORD_RE.lastIndex = 0;
+    while ((m = WORD_RE.exec(text))) {
+      if (m.index > idx) p.appendChild(document.createTextNode(text.slice(idx, m.index)));
+      const span = document.createElement('span');
+      span.className = 'word' + (state.vocab[m[0].toLowerCase()] ? ' saved' : '');
+      span.textContent = m[0];
+      span.dataset.i = m.index;
+      p.appendChild(span);
+      idx = m.index + m[0].length;
+    }
+    if (idx < text.length) p.appendChild(document.createTextNode(text.slice(idx)));
+    reader.appendChild(p);
+  }
+  const n = state.pages.length;
+  $('pageInput').value = state.current + 1;
+  $('btnPrev').disabled = state.current === 0;
+  $('btnNext').disabled = state.current >= n - 1;
+  $('progress').style.width = ((state.current + 1) / n * 100) + '%';
+  localStorage.setItem('lr_pos_' + state.title, state.current);
+  window.scrollTo({ top: 0 });
+}
+
+function goTo(i) {
+  state.current = Math.max(0, Math.min(state.pages.length - 1, i));
+  renderPage();
+}
+$('btnPrev').onclick = () => goTo(state.current - 1);
+$('btnNext').onclick = () => goTo(state.current + 1);
+$('pageInput').onchange = (e) => goTo((+e.target.value || 1) - 1);
+$('btnNewBook').onclick = () => {
+  $('readerSection').classList.add('hidden');
+  $('uploadSection').classList.remove('hidden');
+  $('fileInput').value = '';
+  hideTooltip();
+};
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { hideTooltip(); $('vocabDrawer').classList.add('hidden'); $('settingsModal').classList.add('hidden'); }
+  if ($('readerSection').classList.contains('hidden') || e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight') goTo(state.current + 1);
+  if (e.key === 'ArrowLeft') goTo(state.current - 1);
+});
+
+/* Օրինակելի տեքստ՝ առանց PDF-ի փորձարկելու համար */
+$('btnDemo').onclick = () => {
+  openBook('Demo — The Little Garden', [[
+    'Once upon a time, in a small village near the mountains, there lived an old gardener named Thomas. Every morning he woke up before sunrise and walked slowly to his garden.',
+    'The garden was not large, but it was full of colorful flowers, tall trees, and sweet berries. Thomas believed that patience was the secret of a good harvest.',
+    '"You cannot hurry nature," he often told the children who visited him. "You can only give it care, and wait."'
+  ], [
+    'One day a young girl asked him why he never seemed tired. Thomas smiled and answered that he loved every moment he spent among the plants.',
+    'Learning a language is similar to growing a garden: it needs time, attention, and a little joy every single day.'
+  ]]);
+};
+
+/* =====================================================================
+   ԲԱՌԻ ՍԵՂՄՈՒՄ ԵՎ TOOLTIP
+   ===================================================================== */
+$('reader').addEventListener('click', (e) => {
+  const span = e.target.closest('.word');
+  if (!span) return hideTooltip();
+  e.stopPropagation();
+  showTooltip(span);
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#tooltip') && !e.target.closest('.word')) hideTooltip();
+});
+window.addEventListener('scroll', hideTooltip, { passive: true });
+$('ttClose').onclick = hideTooltip;
+
+function getSentence(text, i) {
+  let start = 0, end = text.length, m;
+  const re = /[.!?]["”’')]?\s+/g;
+  while ((m = re.exec(text))) {
+    const boundary = m.index + m[0].length;
+    if (boundary <= i) start = boundary;
+    else { end = m.index + 1; break; }
+  }
+  return text.slice(start, end).trim();
+}
+
+let currentWord = '';
+async function showTooltip(span) {
+  if (state.activeSpan) state.activeSpan.classList.remove('active');
+  state.activeSpan = span;
+  span.classList.add('active');
+
+  const word = span.textContent;
+  const sentence = getSentence(span.parentElement.dataset.text, +span.dataset.i);
+  currentWord = word;
+
+  $('ttWord').textContent = word;
+  $('ttTranslation').textContent = '…';
+  $('ttSentence').textContent = sentence;
+  $('ttExplain').textContent = '';
+  $('ttKeyBtn').classList.add('hidden');
+  $('ttSource').textContent = '';
+  updateSaveButton(word);
+
+  const tip = $('tooltip');
+  tip.classList.remove('hidden');
+  positionTooltip(span, tip);
+
+  try {
+    const res = await translate(word, sentence);
+    if (currentWord !== word) return; // օգտատերը արդեն այլ բառ է սեղմել
+    $('ttTranslation').textContent = res.word;
+    $('ttExplain').textContent = res.explanation || '';
+    $('ttSource').textContent = res.source;
+    state.lastResult = res;
+    positionTooltip(span, tip);
+  } catch (err) {
+    if (currentWord !== word) return;
+    if (err instanceof NoKeyError) {
+      $('ttTranslation').textContent = 'Պետք է API բանալի';
+      $('ttExplain').textContent = 'Թարգմանության համար մուտքագրիր Google Gemini API բանալին։';
+      $('ttKeyBtn').classList.remove('hidden');
+    } else {
+      $('ttTranslation').textContent = 'Թարգմանությունը հասանելի չէ';
+      $('ttExplain').textContent = err.message;
+    }
+    positionTooltip(span, tip);
+  }
+}
+
+function positionTooltip(span, tip) {
+  const r = span.getBoundingClientRect();
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+  let top = r.bottom + 8;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
+
+function hideTooltip() {
+  $('tooltip').classList.add('hidden');
+  if (state.activeSpan) { state.activeSpan.classList.remove('active'); state.activeSpan = null; }
+}
+
+/* Արտասանություն (բրաուզերի ներկառուցված TTS) */
+$('ttSpeak').onclick = () => {
+  const u = new SpeechSynthesisUtterance(currentWord);
+  u.lang = 'en-US';
+  speechSynthesis.speak(u);
+};
+
+/* =====================================================================
+   API ԲԱՆԱԼԻ ԿԱՌԱՎԱՐՈՒՄ (localStorage)
+   ===================================================================== */
+function getApiKey() {
+  try { return (localStorage.getItem(CONFIG.keyStorage) || '').trim(); } catch { return ''; }
+}
+function refreshKeyUi() {
+  const has = !!getApiKey();
+  $('keyDot').className = 'inline-block w-2 h-2 rounded-full ' + (has ? 'bg-emerald-500' : 'bg-red-500');
+  $('keyHint').classList.toggle('hidden', has);
+}
+function openSettings() {
+  $('modelInput').value = getManualModel();
+  $('modelList').classList.add('hidden');
+  showModel();
+  $('keyInput').value = getApiKey();
+  $('keyInput').type = 'password';
+  setKeyMsg('', '');
+  $('settingsModal').classList.remove('hidden');
+  setTimeout(() => $('keyInput').focus(), 50);
+}
+function closeSettings() { $('settingsModal').classList.add('hidden'); }
+function setKeyMsg(text, kind) {
+  const el = $('keyMsg');
+  el.textContent = text;
+  el.className = 'text-sm mt-3 min-h-[1.25rem] ' +
+    (kind === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : kind === 'err' ? 'text-red-600 dark:text-red-400' : 'text-stone-500');
+}
+
+$('btnSettings').onclick = openSettings;
+$('keyHintBtn').onclick = openSettings;
+$('ttKeyBtn').onclick = () => { hideTooltip(); openSettings(); };
+$('keyClose').onclick = closeSettings;
+$('settingsModal').addEventListener('click', (e) => { if (e.target === $('settingsModal')) closeSettings(); });
+$('keyToggle').onclick = () => { $('keyInput').type = $('keyInput').type === 'password' ? 'text' : 'password'; };
+$('keyRemove').onclick = () => {
+  try { localStorage.removeItem(CONFIG.keyStorage); } catch {}
+  saveModel('');
+  cache.clear();
+  $('keyInput').value = '';
+  refreshKeyUi();
+  setKeyMsg('Բանալին ջնջվեց։', 'ok');
+};
+$('keySave').onclick = async () => {
+  // Միայն մաքրում ենք պատահական բացատրերը/չակերտները. նախածանցի ստուգում չկա
+  const k = $('keyInput').value.replace(/\s+/g, '').replace(/^["'“”]+|["'“”]+$/g, '');
+  if (!k) return setKeyMsg('Մուտքագրիր բանալին։', 'err');
+  try { localStorage.setItem(CONFIG.keyStorage, k); localStorage.setItem(CONFIG.manualStorage, $('modelInput').value.trim()); } catch {}
+  saveModel('');
+  cache.clear();
+  refreshKeyUi();
+  setKeyMsg('Ստուգում եմ…', '');
+  try {
+    const r = await translateWithGemini('garden', 'The garden was full of flowers.');
+    setKeyMsg('✓ Աշխատում է · ' + getSavedModel() + ' (' + getSavedVer() + ') · «garden» → ' + r.word, 'ok');
+  } catch (err) {
+    setKeyMsg(err.message, 'err');
+  }
+};
+$('keyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('keySave').click(); });
+refreshKeyUi();
+
+/* =====================================================================
+   ԹԱՐԳՄԱՆՈՒԹՅՈՒՆ (Google Gemini)
+   ===================================================================== */
+class NoKeyError extends Error {}
+
+async function translate(word, sentence) {
+  const key = word.toLowerCase() + '|' + sentence;
+  if (cache.has(key)) return cache.get(key);
+  const res = await translateWithGemini(word, sentence);
+  cache.set(key, res);
+  return res;
+}
+
+
+/* ---------- Մոդելի / API տարբերակի պահպանում ---------- */
+function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } }
+function lsSet(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} }
+function getSavedModel() { return lsGet(CONFIG.modelStorage); }
+function getSavedVer() { return lsGet(CONFIG.verStorage); }
+function getManualModel() { return lsGet(CONFIG.manualStorage); }
+function saveModel(m, ver = '') { lsSet(CONFIG.modelStorage, m); lsSet(CONFIG.verStorage, m ? ver : ''); showModel(); }
+function showModel() {
+  const m = getSavedModel();
+  $('keyModel').textContent = m ? `Օգտագործվող մոդել՝ ${m} (${getSavedVer()})` : '';
+}
+const endpoint = (ver, path) => `${CONFIG.apiHost}/${ver}/${path}`;
+
+async function errMsg(r) {
+  try { return (await r.json())?.error?.message || ''; } catch { return ''; }
+}
+async function geminiError(r, msg) {
+  if (msg === undefined) msg = await errMsg(r);
+  if (r.status === 400 && /API key/i.test(msg)) return new Error('API բանալին սխալ է։ Ստուգիր կարգավորումներում։');
+  if (r.status === 403) return new Error('Բանալին մուտք չունի (403)։ ' + msg.slice(0, 100));
+  if (r.status === 429) return new Error('Հարցումների սահմանաչափը լրացել է․ փորձիր մի փոքր հետո։');
+  return new Error(`Gemini սխալ ${r.status}` + (msg ? ': ' + msg.slice(0, 160) : ''));
+}
+
+/* ---------- «Հասանելի մոդելներ» կոճակ. հարցնում է Google-ից ցանկը ---------- */
+async function listModels(apiKey) {
+  let lastErr = null;
+  for (const ver of CONFIG.apiVersions) {
+    try {
+      const all = [];
+      let token = '';
+      for (let i = 0; i < 5; i++) {
+        const r = await fetch(endpoint(ver, 'models?pageSize=1000') + (token ? '&pageToken=' + encodeURIComponent(token) : ''),
+          { headers: { 'x-goog-api-key': apiKey } });
+        if (!r.ok) throw await geminiError(r);
+        const d = await r.json();
+        all.push(...(d.models || []));
+        token = d.nextPageToken || '';
+        if (!token) break;
+      }
+      const ok = all.filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+                    .map(m => m.name.replace(/^models\//, ''));
+      if (ok.length) return { ver, models: ok };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('Մոդելների ցանկը դատարկ է։');
+}
+$('btnListModels').onclick = async () => {
+  const k = $('keyInput').value.trim() || getApiKey();
+  if (!k) return setKeyMsg('Նախ մուտքագրիր API բանալին։', 'err');
+  setKeyMsg('Հարցնում եմ Google-ից…', '');
+  const box = $('modelList');
+  box.innerHTML = '';
+  try {
+    const { ver, models } = await listModels(k);
+    models.sort((a, b) => (/flash/.test(b) - /flash/.test(a)) || a.localeCompare(b));
+    for (const m of models) {
+      const b = document.createElement('button');
+      b.textContent = m;
+      b.className = 'text-xs px-2 py-1 rounded-md border border-amber-300 dark:border-slate-600 hover:bg-amber-100 dark:hover:bg-slate-700 ' +
+        (/flash/.test(m) ? 'font-semibold' : 'opacity-70');
+      b.onclick = () => { $('modelInput').value = m; setKeyMsg(`Ընտրված է՝ ${m}։ Սեղմիր «Պահպանել և ստուգել»։`, 'ok'); };
+      box.appendChild(b);
+    }
+    box.classList.remove('hidden');
+    setKeyMsg(`Գտնվեց ${models.length} մոդել (${ver})։ Ընտրիր մեկը։`, 'ok');
+  } catch (e) { setKeyMsg(e.message, 'err'); }
+};
+
+async function translateWithGemini(word, sentence) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new NoKeyError('API բանալին դրված չէ');
+
+  const prompt =
+    `Թարգմանիր "${word}" բառը հայերեն՝ հաշվի առնելով հետևյալ նախադասության համատեքստը. "${sentence}"։ ` +
+    `Տուր միայն ճշգրիտ հայերեն թարգմանությունը (1-3 բառով), իսկ ներքևում շատ կարճ բացատրիր դրա իմաստը ` +
+    `այս նախադասության մեջ՝ առանց ավելորդ տեքստի։`;
+  const sys =
+    'You are a precise English-to-Armenian contextual dictionary. Write only in Armenian script. ' +
+    'Return JSON with two fields: "translation" (the exact Armenian translation, 1-3 words) and ' +
+    '"explanation" (one very short Armenian sentence explaining the meaning of the word in this specific sentence). No extra text.';
+
+  // v1beta՝ լրիվ հնարավորություններով (systemInstruction + JSON schema)
+  const bodyFull = {
+    systemInstruction: { parts: [{ text: sys }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.2,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: 'OBJECT',
+        properties: { translation: { type: 'STRING' }, explanation: { type: 'STRING' } },
+        required: ['translation', 'explanation'],
+      },
+    },
+  };
+  // v1՝ պարզեցված (առանց systemInstruction/schema), հրահանգը ներառված է prompt-ում
+  const bodySimple = {
+    contents: [{ role: 'user', parts: [{ text: sys + '\n\n' + prompt }] }],
+    generationConfig: { temperature: 0.2 },
+  };
+
+  const call = async (model, ver) => {
+    try {
+      return await fetch(endpoint(ver, `models/${model}:generateContent`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify(ver === 'v1beta' ? bodyFull : bodySimple),
+      });
+    } catch {
+      throw new Error('Ցանցային սխալ․ ստուգիր ինտերնետ կապը։');
+    }
+  };
+
+  // Թեկնածուների ցանկ (մոդել, տարբերակ). ձեռքով մուտքագրվածը՝ առաջինը
+  const manual = getManualModel().replace(/^models\//, '');
+  const savedM = getSavedModel(), savedV = getSavedVer();
+  const models = manual ? [manual] : (CONFIG.models.includes(savedM)
+    ? [savedM, ...CONFIG.models.filter(m => m !== savedM)] : CONFIG.models);
+  const pairs = [];
+  for (const m of models) {
+    const vers = (m === savedM && savedV) ? [savedV, ...CONFIG.apiVersions.filter(v => v !== savedV)] : CONFIG.apiVersions;
+    for (const v of vers) pairs.push([m, v]);
+  }
+
+  let r = null, model = '', ver = '';
+  const errors = [];
+  for (const [m, v] of pairs) {
+    const resp = await call(m, v);
+    if (resp.status === 404) { errors.push(`${m} (${v}): ` + ((await errMsg(resp)) || '404').slice(0, 90)); continue; }
+    r = resp; model = m; ver = v;
+    break;
+  }
+  if (!r) {
+    throw new Error('404 — մոդելը չգտնվեց։ Բացիր ⚙️ և սեղմիր «Հասանելի մոդելներ»՝ քո բանալու մոդելները տեսնելու համար։ ' +
+      'Google-ի պատասխանը՝ ' + (errors[0] || ''));
+  }
+  if (!r.ok) throw await geminiError(r);
+  saveModel(model, ver);
+
+  const data = await r.json();
+  const raw = data?.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('').trim();
+  if (!raw) throw new Error('Gemini-ն դատարկ պատասխան վերադարձրեց։');
+  const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+
+  let word_hy = text, explanation = '';
+  try {
+    const j = JSON.parse(text);
+    word_hy = (j.translation || '').trim() || text;
+    explanation = (j.explanation || '').trim();
+  } catch {
+    const [first, ...rest] = text.split('\n').filter(Boolean);
+    word_hy = first; explanation = rest.join(' ');
+  }
+  return { word: word_hy, explanation, source: `Gemini · ${model} (${ver})` };
+}
+
+/* =====================================================================
+   ՊԱՀՎԱԾ ԲԱՌԵՐ (Vocabulary)
+   ===================================================================== */
+function saveVocab() {
+  localStorage.setItem('lr_vocab', JSON.stringify(state.vocab));
+  $('vocabCount').textContent = Object.keys(state.vocab).length;
+}
+function updateSaveButton(word) {
+  $('ttSave').textContent = state.vocab[word.toLowerCase()] ? '★' : '☆';
+}
+$('ttSave').onclick = () => {
+  const key = currentWord.toLowerCase();
+  if (state.vocab[key]) delete state.vocab[key];
+  else state.vocab[key] = { hy: $('ttTranslation').textContent, note: $('ttExplain').textContent, sentence: $('ttSentence').textContent };
+  saveVocab();
+  updateSaveButton(currentWord);
+  document.querySelectorAll('.word').forEach(w => {
+    if (w.textContent.toLowerCase() === key) w.classList.toggle('saved', !!state.vocab[key]);
+  });
+  renderVocab();
+};
+function renderVocab() {
+  const list = $('vocabList');
+  list.innerHTML = '';
+  const keys = Object.keys(state.vocab);
+  $('vocabEmpty').classList.toggle('hidden', keys.length > 0);
+  for (const k of keys) {
+    const li = document.createElement('li');
+    li.className = 'p-2 rounded-lg bg-amber-50 dark:bg-slate-700/60';
+    const head = document.createElement('div');
+    head.className = 'flex justify-between items-center';
+    const t = document.createElement('div');
+    t.innerHTML = '<b></b> — <span class="text-amber-700 dark:text-amber-400"></span>';
+    t.querySelector('b').textContent = k;
+    t.querySelector('span').textContent = state.vocab[k].hy;
+    const del = document.createElement('button');
+    del.textContent = '🗑';
+    del.onclick = () => { delete state.vocab[k]; saveVocab(); renderVocab(); renderPage(); };
+    head.append(t, del);
+    const s = document.createElement('div');
+    s.className = 'text-xs italic text-stone-500 dark:text-slate-400 mt-1';
+    s.textContent = state.vocab[k].sentence;
+    li.append(head);
+    if (state.vocab[k].note) {
+      const n = document.createElement('div');
+      n.className = 'text-xs mt-1';
+      n.textContent = state.vocab[k].note;
+      li.append(n);
+    }
+    li.append(s);
+    list.appendChild(li);
+  }
+}
+$('btnVocab').onclick = () => { renderVocab(); $('vocabDrawer').classList.remove('hidden'); };
+$('vocabClose').onclick = () => $('vocabDrawer').classList.add('hidden');
+saveVocab();
+</script>
+</body>
+</html>
